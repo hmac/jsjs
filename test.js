@@ -39,6 +39,17 @@ expect("string escape 3", "\"\\\"\"", function (s) { return s.parseExpr(); }, { 
 expect("empty array", "[]", function (s) { return s.parseExpr(); }, { type: "array", elements: [] });
 expect("array of one number", "[1]", function (s) { return s.parseExpr(); }, { type: "array", elements: [{ type: "number", value: 1 }] });
 expect("array of one string", "['hi']", function (s) { return s.parseExpr(); }, { type: "array", elements: [{ type: "string", value: "hi" }] });
+// Array indexing
+expect("integer index", "a[1]", function (s) { return s.parseExpr(); }, {
+    type: 'funcall',
+    object: { type: 'variable', name: 'a' },
+    chain: [{ type: 'arrindex', index: { type: 'number', value: 1 } }]
+});
+expect("string index", "a['foo']", function (s) { return s.parseExpr(); }, {
+    type: 'funcall',
+    object: { type: 'variable', name: 'a' },
+    chain: [{ type: 'arrindex', index: { type: 'string', value: "foo" } }]
+});
 // Objects
 expect("empty object", "{}", function (s) { return s.parseExpr(); }, { type: "object", elements: [] });
 expect("object with single quote key", "{'hi': 'there'}", function (s) { return s.parseExpr(); }, { type: "object", elements: [["hi", { type: "string", value: "there" }]] });
@@ -109,7 +120,7 @@ expect("while (x === 1) { a += x; }", "while (x === 1) { a += x; }", function (s
 // Functions
 expect("empty unnamed function", "function() {}", function (s) { return s.parseExpr(); }, { type: "function", name: null, body: [], args: [] });
 expect("empty named function", "function foo() {}", function (s) { return s.parseExpr(); }, { type: "function", name: "foo", body: [], args: [] });
-expect("simple function", "function foo(a) { return a; }", function (s) { return s.parseExpr(); }, { type: "function", name: "foo", body: [{ type: "return", value: { type: "variable", name: "a" } }], args: ["a"] });
+expect("simple function", "function foo(a) { return; }", function (s) { return s.parseExpr(); }, { type: "function", name: "foo", body: [{ type: "return", value: null }], args: ["a"] });
 expect("complex function", "function foo(a, b, c) { a = 1; b.fireMissiles(); return a; }", function (s) { return s.parseExpr(); }, {
     type: "function",
     name: "foo",
@@ -122,6 +133,29 @@ expect("complex function", "function foo(a, b, c) { a = 1; b.fireMissiles(); ret
         { type: "return", value: { type: "variable", name: "a" } },
     ],
     args: ["a", "b", "c"]
+});
+// Assignment
+expect("a = b;", "a = b;", function (s) { return s.parseStatement(); }, {
+    type: "assign",
+    assigns: [
+        {
+            name: { type: "variable", name: "a" },
+            value: { type: "variable", name: "b" }
+        },
+    ]
+});
+// If statement
+expect("if (a == 1) { foo(); }", "if (a == 1) { foo(); }", function (s) { return s.parseStatement(); }, {
+    type: "if",
+    cond: { type: "infixop", op: "==", left: { type: "variable", name: "a" }, right: { type: "number", value: 1 } },
+    then: [
+        {
+            type: 'funcall',
+            object: { type: 'variable', name: 'foo' },
+            chain: [{ type: 'funcall', args: [] }]
+        }
+    ],
+    "else": null
 });
 // Constructor function
 expect("constructor function", "function State(input) {\n var _this = this; // The parse state \n}", function (s) { return s.parseExpr(); }, {
@@ -141,6 +175,8 @@ expect("constructor function", "function State(input) {\n var _this = this; // T
     ],
     args: ["input"]
 });
+// Function call
+expectSuccess("foo.bar(function() { return a; })", "foo.bar(function() { return a; });", function (s) { return s.parseStatement(); });
 // Bare variable declaration
 expect("var a;", "var a;", function (s) { return s.parseStatement(); }, { type: "vardecl", names: [{ type: "variable", name: "a" }] });
 // try..catch
@@ -175,6 +211,8 @@ expectSuccess("another small example", fs.readFileSync("./sample3.js", { encodin
 expectSuccess("many infix ops", fs.readFileSync("./sample4.js", { encoding: "utf-8" }), function (s) { return s.parseStatement(); });
 // Another small example
 expectSuccess("!expr", fs.readFileSync("./sample5.js", { encoding: "utf-8" }), function (s) { return s.parseStatement(); });
+// Another small example
+expectSuccess("a more complex function", fs.readFileSync("./sample6.js", { encoding: "utf-8" }), function (s) { return s.parseStatement(); });
 // A large example
 expectSuccess("a very large constructor", fs.readFileSync("./sample.js", { encoding: "utf-8" }), function (s) { return s.parseStatement(); });
 // The whole parser

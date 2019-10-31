@@ -63,7 +63,7 @@ function State(input) {
     // Consume the string if it matches the input
     this.string = string.bind(this);
     // Core methods
-    this.backtrack = function (f) {
+    this["try"] = function (f) {
         var loc_before = _this.loc;
         try {
             return f();
@@ -92,9 +92,9 @@ function parseStatement() {
         this.parseThrow,
         this.parseTryCatch,
         this.parseComment,
-        this.parseAssign,
-        this.parseVarDecl,
-        function () { var e = _this.parseExpr(); _this.semicolon(); return e; },
+        function () { return _this["try"](_this.parseAssign); },
+        function () { return _this["try"](_this.parseVarDecl); },
+        function () { return _this["try"](function () { var e = _this.parseExpr(); _this.semicolon(); return e; }); },
     ]);
 }
 function parseComment() {
@@ -167,7 +167,7 @@ function parseAssign() {
 }
 function parseReturn() {
     this.token("return");
-    var expr = this.parseExpr();
+    var expr = this.maybe(this.parseExpr);
     this.semicolon();
     return { type: "return", value: expr };
 }
@@ -211,9 +211,9 @@ function parseExpr() {
     var _this = this;
     return this.oneOf([
         this.parseNew,
-        this.parseInfixOp,
+        function () { return _this["try"](_this.parseInfixOp); },
         this.parseFunction,
-        this.parseFunCall,
+        function () { return _this["try"](_this.parseFunCall); },
         this.parseNumber,
         this.parseString,
         this.parseArr,
@@ -221,14 +221,14 @@ function parseExpr() {
         this.parseNot,
         function () { return _this.parens(_this.parseExpr); },
         function () { _this.parseComment(); return _this.parseExpr(); },
-        this.parseVar,
+        function () { return _this["try"](_this.parseVar); },
     ]);
 }
 function parseMethodCall() {
     var _this = this;
     var obj = this.oneOf([
-        this.parseVar,
         (function () { return _this.parens(_this.parseExpr); }),
+        function () { return _this["try"](_this.parseVar); },
     ]);
     this.token(".");
     var method = this.parseVar();
@@ -350,6 +350,8 @@ function parseInfixOp() {
         function () { return _this.token("+"); },
         function () { return _this.token(">="); },
         function () { return _this.token("<="); },
+        function () { return _this.token("<"); },
+        function () { return _this.token(">"); },
         function () { return _this.token("&&"); },
         function () { return _this.token("||"); },
     ]);
@@ -365,30 +367,30 @@ function many(parser) {
     }
     return rs;
 }
-// TODO: consider removing backtracking from this combinator,
-// to improve error messages and perf.
-// This way, once we reach an obviously correct parse path (e.g. we parse a
-// 'return') we don't backtrack out of it.
-// What we can do is catch failure, and continue to the next parser if no input
-// has been consumed, otherwise fail.
 function oneOf(parsers) {
     var _this = this;
     var result;
     parsers.forEach(function (parser) {
         if (result === undefined) {
+            var loc_before = _this.loc;
             try {
-                result = _this.backtrack(parser);
+                result = parser();
             }
-            catch (_a) {
+            catch (err) {
+                if (loc_before < _this.loc) {
+                    // We have consumed input, so fail
+                    throw err;
+                }
+                // Otherwise, continue to the next parser
             }
         }
     });
     // if the result is null, try the last parser again to get an error message
-    return result || this.backtrack(parsers.pop());
+    return result || this["try"](parsers.pop());
 }
 function maybe(parser) {
     try {
-        return this.backtrack(parser);
+        return this["try"](parser);
     }
     catch (_a) {
         return null;
@@ -407,7 +409,7 @@ function brackets(parser) {
     return this.between(function () { return _this.token("["); }, function () { return _this.token("]"); }, parser);
 }
 function between(left, right, parser) {
-    return this.backtrack(function () {
+    return this["try"](function () {
         left();
         var r = parser();
         right();
@@ -419,7 +421,7 @@ function sepBy(sep, parser) {
     var first;
     // if the first parse fails, return an empty array
     try {
-        this.backtrack(function () { first = parser(); });
+        this["try"](function () { first = parser(); });
     }
     catch (_a) {
         return [];

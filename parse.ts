@@ -77,7 +77,7 @@ function State(input : string) {
   this.string = string.bind(this);
 
   // Core methods
-  this.backtrack = <T>(f : () => T) : T => {
+  this.try = <T>(f : () => T) : T => {
     let loc_before = this.loc;
     try {
       return f();
@@ -110,9 +110,9 @@ function parseStatement() : Statement {
     <Parser<Statement>>this.parseThrow,
     <Parser<Statement>>this.parseTryCatch,
     <Parser<Statement>>this.parseComment,
-    <Parser<Statement>>this.parseAssign,
-    <Parser<Statement>>this.parseVarDecl,
-    () => { let e = this.parseExpr(); this.semicolon(); return e },
+    () => this.try(this.parseAssign),
+    () => this.try(this.parseVarDecl),
+    () => this.try(() => { let e = this.parseExpr(); this.semicolon(); return e }),
   ]);
 }
 
@@ -198,10 +198,10 @@ function parseAssign() : Assign {
   return { type: "assign", assigns: assigns };
 }
 
-type Return = {type : string, value : Expr};
+type Return = {type : string, value? : Expr};
 function parseReturn() : Return {
   this.token("return");
-  let expr = this.parseExpr();
+  let expr = this.maybe(this.parseExpr);
   this.semicolon();
   return { type: "return", value: expr };
 }
@@ -252,9 +252,9 @@ type Expr = Num | Str | Arr | Var | FunCall | ArrIndex | InfixOp | Func;
 function parseExpr() : Expr {
   return this.oneOf([
     <Parser<Expr>>this.parseNew,
-    <Parser<Expr>>this.parseInfixOp,
+    () => this.try(this.parseInfixOp),
     <Parser<Expr>>this.parseFunction,
-    <Parser<Expr>>this.parseFunCall,
+    () => this.try(this.parseFunCall),
     <Parser<Expr>>this.parseNumber,
     <Parser<Expr>>this.parseString,
     <Parser<Expr>>this.parseArr,
@@ -262,14 +262,14 @@ function parseExpr() : Expr {
     this.parseNot,
     () => this.parens(this.parseExpr),
     () => { this.parseComment(); return this.parseExpr() },
-    <Parser<Expr>>this.parseVar,
+    () => this.try(this.parseVar),
   ]);
 }
 
 function parseMethodCall() : MethodCall {
   let obj = this.oneOf([
-    <Parser<Expr>>this.parseVar,
     <Parser<Expr>>(() => this.parens(this.parseExpr)),
+    () => this.try(this.parseVar),
   ]);
 
   this.token(".");
@@ -422,6 +422,8 @@ function parseInfixOp() : InfixOp {
     () => this.token("+"),
     () => this.token(">="),
     () => this.token("<="),
+    () => this.token("<"),
+    () => this.token(">"),
     () => this.token("&&"),
     () => this.token("||"),
     // more here
@@ -440,30 +442,30 @@ function many<T>(parser : Parser<T>) : Array<T> {
   return rs;
 }
 
-// TODO: consider removing backtracking from this combinator,
-// to improve error messages and perf.
-// This way, once we reach an obviously correct parse path (e.g. we parse a
-// 'return') we don't backtrack out of it.
-// What we can do is catch failure, and continue to the next parser if no input
-// has been consumed, otherwise fail.
 function oneOf<T>(parsers: Parser<T>[]) : T {
   var result : T;
   parsers.forEach((parser) => {
     if (result === undefined) {
+      let loc_before = this.loc;
       try {
-        result = this.backtrack(parser);
+        result = parser();
       }
-      catch {
+      catch (err) {
+        if (loc_before < this.loc) {
+          // We have consumed input, so fail
+          throw err;
+        }
+        // Otherwise, continue to the next parser
       }
     }
   });
   // if the result is null, try the last parser again to get an error message
-  return result || this.backtrack(parsers.pop());
+  return result || this.try(parsers.pop());
 }
 
 function maybe<T>(parser : Parser<T>) : T | null {
   try {
-    return this.backtrack(parser);
+    return this.try(parser);
   }
   catch {
     return null;
@@ -495,7 +497,7 @@ function brackets<T>(parser : Parser<T>) : T {
 }
 
 function between<T>(left : Parser<string>, right : Parser<string>, parser : Parser<T>) : T {
-  return this.backtrack(() => {
+  return this.try(() => {
     left();
     let r = parser();
     right();
@@ -508,7 +510,7 @@ function sepBy<T>(sep : Parser<string>, parser : Parser<T>) : T[] {
   let first : T;
   // if the first parse fails, return an empty array
   try {
-    this.backtrack(() => { first = parser(); });
+    this.try(() => { first = parser(); });
   }
   catch {
     return []
